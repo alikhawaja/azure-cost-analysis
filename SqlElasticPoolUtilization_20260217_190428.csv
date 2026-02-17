@@ -1,0 +1,8 @@
+SubscriptionId,ResourceGroup,ServerName,PoolName,Edition,DTU,StorageAllocated,StorageUsed,SqlUtilization,State,MetricType
+945c9455-d93f-487e-bfc5-03e5410eae09,rg-splg-logsp-common-prd-ger-01,sql-splg-logsp-prd-ger-01,sqlep-splg-logsp-critical-oltp-prd-ger-01,BusinessCritical,16,1024,0,0.08,Ready,sql_instance_cpu_percent
+945c9455-d93f-487e-bfc5-03e5410eae09,rg-splg-logsp-common-prd-ger-01,sql-splg-logsp-prd-ger-01,sqlep-splg-logsp-identity-prd-ger-01,GeneralPurpose,4,256,0,1.25,Ready,sql_instance_cpu_percent
+945c9455-d93f-487e-bfc5-03e5410eae09,rg-splg-logsp-common-prd-ger-01,sql-splg-logsp-prd-ger-01,sqlep-splg-logsp-light-prd-ger-01,GeneralPurpose,4,256,0,0.6,Ready,sql_instance_cpu_percent
+945c9455-d93f-487e-bfc5-03e5410eae09,rg-splg-logsp-common-prd-ger-01,sql-splg-logsp-prd-ger-01,sqlep-splg-logsp-medium-prd-ger-01,GeneralPurpose,8,756,0,0.28,Ready,sql_instance_cpu_percent
+945c9455-d93f-487e-bfc5-03e5410eae09,rg-splg-logsp-common-prd-ger-01,sql-splg-logsp-prd-ger-01,sqlep-splg-logsp-reference-prd-ger-01,GeneralPurpose,8,756,0,0.34,Ready,sql_instance_cpu_percent
+945c9455-d93f-487e-bfc5-03e5410eae09,rg-splg-logsp-common-prd-ger-01,sql-splg-logsp-prd-ger-01,sqlep-splg-logsp-high-load-prd-ger-01,BusinessCritical,12,1024,20.48,2.25,Ready,sql_instance_cpu_percent
+945c9455-d93f-487e-bfc5-03e5410eae09,rg-splg-logsp-common-prd-ger-01,sql-splg-logsp-prd-ger-01,sqlep-splg-logsp-reporting-prd-ger-01,GeneralPurpose,8,1024,0,0.69,Ready,sql_instance_cpu_percent

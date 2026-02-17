@@ -7,127 +7,126 @@ $entra_tenant = $spl_digital
 # Connect to Azure (uncomment if not already connected)
 # Connect-AzAccount -Tenant $entra_tenant -UseDeviceAuthentication
 
-Write-Host "🔍 Discovering SQL Elastic Pools across all subscriptions..." -ForegroundColor Cyan
-
-# Get all subscriptions
-$subscriptions = Get-AzSubscription
+# Initialize results
 $results = @()
 $totalPools = 0
 
-$subscription = "https://portal.azure.com/#resource/subscriptions/945c9455-d93f-487e-bfc5-03e5410eae09"
-$resourceGroups = @("rg-splg-logsp-common-prd-ger-01", "rg-splg-logsp-common-uat-ger-01", "rg-splg-logsp-common-dev-ger-01") # Add more resource groups if needed   
-$sqlServerNames = @("sql-splg-logsp-prd-ger-01", "sql-splg-logsp-uat-ger-01","sql-splg-logsp-dev-ger-01")
+$subscriptionId = "945c9455-d93f-487e-bfc5-03e5410eae09"
 
+# Create a collection of resource groups paired with their SQL server names
+$rgwithsqlsrvs = @(
+    @{ ResourceGroup = "rg-splg-logsp-common-prd-ger-01"; SqlServer = "sql-splg-logsp-prd-ger-01" },
+    @{ ResourceGroup = "rg-splg-logsp-common-uat-ger-01"; SqlServer = "sql-splg-logsp-uat-ger-01" },
+    @{ ResourceGroup = "rg-splg-logsp-common-dev-ger-01"; SqlServer = "sql-splg-logsp-dev-ger-01" }
+)
 
-foreach ($subscription in $subscriptions) {
-    Write-Host "`n📍 Checking subscription: $($subscription.Name)" -ForegroundColor Yellow
-    
-    try {
-        Set-AzContext -SubscriptionId $subscription.Id | Out-Null
-        
-        # Get all resource groups in this subscription
-        $resourceGroups = Get-AzResourceGroup
-        
-        foreach ($rg in $resourceGroups) {
-            Write-Host "   🔍 Checking resource group: $($rg.ResourceGroupName)" -ForegroundColor Gray
-            
-            try {
-                # Get all SQL servers in this resource group
-                $sqlServers = Get-AzSqlServer -ResourceGroupName $rg.ResourceGroupName -ErrorAction SilentlyContinue
-                
-                foreach ($server in $sqlServers) {
-                    Write-Host "      🖥️ Checking SQL Server: $($server.ServerName)" -ForegroundColor DarkGray
+Set-AzContext -SubscriptionId $subscriptionId | Out-Null
+
+foreach ($rgwithsqlsrv in $rgwithsqlsrvs) {
+     $rgName = $rgwithsqlsrv.ResourceGroup
+     $sqlServerName = $rgwithsqlsrv.SqlServer
+     
+     Write-Host "   🔍 Checking resource group: $rgName and SQL Server: $sqlServerName" -ForegroundColor Gray
+     
+     try {
+         # Get the specified SQL server
+         $sqlServer = Get-AzSqlServer -ResourceGroupName $rgName -ServerName $sqlServerName -ErrorAction SilentlyContinue
+         
+         if ($sqlServer) {
+             Write-Host "      🖥️ Found SQL Server: $($sqlServer.ServerName)" -ForegroundColor DarkGray
+             
+             # Get all elastic pools for this server
+             $elasticPools = Get-AzSqlElasticPool -ResourceGroupName $rgName -ServerName $sqlServer.ServerName -ErrorAction SilentlyContinue
+             
+             foreach ($pool in $elasticPools) 
+             {
+                 $totalPools++
+                    Write-Host "         💎 Found Elastic Pool: $($pool.ElasticPoolName)" -ForegroundColor Green
                     
                     try {
-                        # Get all elastic pools for this server
-                        $elasticPools = Get-AzSqlElasticPool -ResourceGroupName $rg.ResourceGroupName -ServerName $server.ServerName -ErrorAction SilentlyContinue
+                        # Get utilization metrics for the pool (last 14 days)
+                        $endTime = Get-Date
+                        $startTime = $endTime.AddDays(-14)
                         
-                        foreach ($pool in $elasticPools) {
-                            $totalPools++
-                            Write-Host "         💎 Found Elastic Pool: $($pool.ElasticPoolName)" -ForegroundColor Green
-                            
-                            try {
-                                # Get utilization metrics for the pool (last 24 hours)
-                                $endTime = Get-Date
-                                $startTime = $endTime.AddHours(-24)
-                                
-                                # Try different metric names based on pool edition
-                                $metricName = if ($pool.Edition -eq "Basic" -or $pool.Edition -eq "Standard" -or $pool.Edition -eq "Premium") {
-                                    "dtu_consumption_percent"
-                                } else {
-                                    "cpu_percent"  # For vCore-based pools
-                                }
-                                
-                                $metrics = Get-AzMetric -ResourceId $pool.ResourceId `
-                                    -MetricName $metricName `
-                                    -StartTime $startTime `
-                                    -EndTime $endTime `
-                                    -AggregationType Average `
-                                    -ErrorAction SilentlyContinue
-                                
-                                # Calculate average utilization if metrics exist
-                                $avgUtilization = 0
-                                $maxUtilization = 0
-                                if ($metrics.Data -and $metrics.Data.Count -gt 0) {
-                                    $validData = $metrics.Data | Where-Object { $_.Average -ne $null }
-                                    if ($validData) {
-                                        $avgUtilization = ($validData | Measure-Object -Property Average -Average).Average
-                                        $maxUtilization = ($validData | Measure-Object -Property Average -Maximum).Maximum
-                                    }
-                                }
-                                
-                                $results += [PSCustomObject]@{
-                                    SubscriptionName   = $subscription.Name
-                                    SubscriptionId     = $subscription.Id
-                                    ResourceGroup      = $rg.ResourceGroupName
-                                    ServerName         = $server.ServerName
-                                    PoolName          = $pool.ElasticPoolName
-                                    Edition           = $pool.Edition
-                                    DTU               = $pool.Dtu
-                                    vCores            = $pool.VCore
-                                    StorageGB         = [math]::Round($pool.StorageMB / 1024, 2)
-                                    AvgUtilization    = [math]::Round($avgUtilization, 2)
-                                    MaxUtilization    = [math]::Round($maxUtilization, 2)
-                                    State             = $pool.State
-                                    Location          = $pool.Location
-                                    MetricType        = $metricName
-                                }
+                        # Try different metric names based on pool edition
+                        # Ref: https://learn.microsoft.com/azure/azure-monitor/reference/supported-metrics/microsoft-sql-servers-elasticpools-metrics
+                        $metricName = if ($pool.Edition -eq "Basic" -or $pool.Edition -eq "Standard" -or $pool.Edition -eq "Premium") {
+                            "dtu_consumption_percent"
+                        } else {
+                            "sql_instance_cpu_percent"  # SQL instance CPU (all user + system workloads) for vCore-based pools
+                        }
+                        
+                        $metrics = Get-AzMetric -ResourceId $pool.ResourceId `
+                            -MetricName $metricName `
+                            -StartTime $startTime `
+                            -EndTime $endTime `
+                            -AggregationType Average `
+                            -ErrorAction SilentlyContinue
+                        
+                        # Calculate average utilization if metrics exist
+                        $avgUtilization = 0
+                        $maxUtilization = 0
+                        if ($metrics.Data -and $metrics.Data.Count -gt 0) {
+                            $validData = $metrics.Data | Where-Object { $_.Average -ne $null }
+                            if ($validData) {
+                                $SqlUtilization = ($validData | Measure-Object -Property Average -Maximum).Maximum
                             }
-                            catch {
-                                Write-Warning "         ⚠️ Error retrieving metrics for pool $($pool.ElasticPoolName): $($_.Exception.Message)"
-                                
-                                # Still add the pool info even without metrics
-                                $results += [PSCustomObject]@{
-                                    SubscriptionName   = $subscription.Name
-                                    SubscriptionId     = $subscription.Id
-                                    ResourceGroup      = $rg.ResourceGroupName
-                                    ServerName         = $server.ServerName
-                                    PoolName          = $pool.ElasticPoolName
-                                    Edition           = $pool.Edition
-                                    DTU               = $pool.Dtu
-                                    vCores            = $pool.VCore
-                                    StorageGB         = [math]::Round($pool.StorageMB / 1024, 2)
-                                    AvgUtilization    = "N/A"
-                                    MaxUtilization    = "N/A"
-                                    State             = $pool.State
-                                    Location          = $pool.Location
-                                    MetricType        = "Error retrieving metrics"
-                                }
+                        }
+
+                        # Get storage used metric (returns bytes)
+                        $storageUsedGB = "N/A"
+                        $storageMetrics = Get-AzMetric -ResourceId $pool.ResourceId `
+                            -MetricName "storage_used" `
+                            -StartTime $endTime.AddHours(-1) `
+                            -EndTime $endTime `
+                            -AggregationType Average `
+                            -ErrorAction SilentlyContinue
+                        if ($storageMetrics.Data -and $storageMetrics.Data.Count -gt 0) {
+                            $validStorageData = $storageMetrics.Data | Where-Object { $_.Average -ne $null } | Select-Object -Last 1
+                            if ($validStorageData) {
+                                $storageUsedGB = [math]::Round($validStorageData.Average / 1GB, 2)
                             }
+                        }
+                        
+                        $results += [PSCustomObject]@{
+                            SubscriptionId     = $subscriptionId
+                            ResourceGroup      = $rgName
+                            ServerName         = $sqlServer.ServerName
+                            PoolName          = $pool.ElasticPoolName
+                            Edition           = $pool.Edition
+                            DTU               = $pool.Dtu
+                            vCores            = $pool.VCore
+                            StorageAllocated  = [math]::Round($pool.StorageMB / 1024, 2)
+                            StorageUsed     = $storageUsedGB
+                            SqlUtilization    = [math]::Round($SqlUtilization, 2)
+                            State             = $pool.State
+                            MetricType        = $metricName
                         }
                     }
                     catch {
-                        Write-Verbose "No elastic pools found for server $($server.ServerName) or access denied"
+                        Write-Warning "         ⚠️ Error retrieving metrics for pool $($pool.ElasticPoolName): $($_.Exception.Message)"
+                        
+                        # Still add the pool info even without metrics
+                        $results += [PSCustomObject]@{
+                            SubscriptionId     = $subscriptionId
+                            ResourceGroup      = $rgName
+                            ServerName         = $sqlServer.ServerName
+                            PoolName          = $pool.ElasticPoolName
+                            Edition           = $pool.Edition
+                            DTU               = $pool.Dtu
+                            vCores            = $pool.VCore
+                            StorageAllocated = [math]::Round($pool.StorageMB / 1024, 2)
+                            StorageUsed     = "N/A"
+                            SqlUtilization    = "N/A"
+                            State             = $pool.State
+                            MetricType        = "Error retrieving metrics"
+                        }
                     }
                 }
             }
-            catch {
-                Write-Verbose "No SQL servers found in resource group $($rg.ResourceGroupName) or access denied"
-            }
         }
-    }
     catch {
-        Write-Warning "Error accessing subscription $($subscription.Name): $($_.Exception.Message)"
+        Write-Verbose "Error processing SQL Server $sqlServerName in resource group ${rgName}: $($_.Exception.Message)"
     }
 }
 
@@ -142,7 +141,7 @@ if ($results) {
     $results | Format-Table -AutoSize
     
     # Calculate statistics for pools with valid metrics
-    $poolsWithMetrics = $results | Where-Object { $_.AvgUtilization -ne "N/A" -and $_.AvgUtilization -gt 0 }
+    $poolsWithMetrics = $results | Where-Object { $_.SqlUtilization -ne "N/A" -and $_.SqlUtilization -gt 0 }
     
     if ($poolsWithMetrics) {
         $overallAverage = ($poolsWithMetrics.AvgUtilization | Measure-Object -Average).Average
@@ -157,17 +156,17 @@ if ($results) {
         Write-Host "Pools with metrics: $($poolsWithMetrics.Count) out of $totalPools" -ForegroundColor Cyan
         
         # Identify underutilized pools (less than 30% average)
-        $underutilized = $poolsWithMetrics | Where-Object { $_.AvgUtilization -lt 30 }
+        $underutilized = $poolsWithMetrics | Where-Object { $_.SqlUtilization -lt 30 }
         if ($underutilized) {
             Write-Host "`n⚠️ UNDERUTILIZED POOLS (< 30% avg utilization):" -ForegroundColor Yellow
-            $underutilized | Select-Object PoolName, ServerName, ResourceGroup, AvgUtilization | Format-Table
+            $underutilized | Select-Object PoolName, ServerName, ResourceGroup, SqlUtilization | Format-Table
         }
         
         # Identify highly utilized pools (more than 80% average)
-        $highlyUtilized = $poolsWithMetrics | Where-Object { $_.AvgUtilization -gt 80 }
+        $highlyUtilized = $poolsWithMetrics | Where-Object { $_.SqlUtilization -gt 80 }
         if ($highlyUtilized) {
             Write-Host "`n🔥 HIGHLY UTILIZED POOLS (> 80% avg utilization):" -ForegroundColor Red
-            $highlyUtilized | Select-Object PoolName, ServerName, ResourceGroup, AvgUtilization, MaxUtilization | Format-Table
+            $highlyUtilized | Select-Object PoolName, ServerName, ResourceGroup, SqlUtilization | Format-Table
         }
     }
     
